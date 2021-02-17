@@ -61,7 +61,7 @@ typedef struct hsp {
 #define PWM_DEPTH (1023)
 #define PWM_TARGET_DUTY 1024
 
-#define ANIM_STEP 5
+#define ANIM_STEP 10
 
 static hsp_t s_hsb_val;
 static uint16_t s_brightness;
@@ -272,7 +272,7 @@ void lightbulb_init(void)
     ledc_channel_config(&ledc_channel);
 
     // start fading task
-    xTaskCreate(ledcFadeTask, "ledcfade", 2048, NULL, tskIDLE_PRIORITY + 1, NULL);
+    xTaskCreate(ledcFadeTask, "ledcfade", 2048, NULL, configMAX_PRIORITIES - 1, NULL);
 }
 
 /**
