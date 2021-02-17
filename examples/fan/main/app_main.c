@@ -42,6 +42,9 @@
 #include <app_wifi.h>
 #include <app_hap_setup_payload.h>
 
+#include "esp_wifi.h"
+#include "LEDCtrl.h"
+
 /*  Required for server verification during OTA, PEM format as string  */
 char server_cert[] = {};
 
@@ -195,8 +198,13 @@ static int fan_write(hap_write_data_t write_data[], int count,
                 hap_char_update_val(write->hc, &(write->val));
                 *(write->status) = HAP_STATUS_SUCCESS;
             }
+        } else if(!strcmp(hap_char_get_type_uuid(write->hc), HAP_CHAR_UUID_ROTATION_SPEED)) {
+          ESP_LOGI(TAG, "Recived Write. Fan Speed: %.1f", write->val.f);
+          ledCtrlSetVal(write->val.f);
+          hap_char_update_val(write->hc, &(write->val));
+          *(write->status) = HAP_STATUS_SUCCESS;
         } else {
-            *(write->status) = HAP_STATUS_RES_ABSENT;
+          *(write->status) = HAP_STATUS_RES_ABSENT;
         }
     }
     return ret;
@@ -244,6 +252,7 @@ static void fan_thread_entry(void *p)
     service = hap_serv_fan_create(false);
     hap_serv_add_char(service, hap_char_name_create("My Fan"));
     hap_serv_add_char(service, hap_char_rotation_direction_create(0));
+    hap_serv_add_char(service, hap_char_rotation_speed_create(0));
 
     /* Set the write callback for the service */
     hap_serv_set_write_cb(service, fan_write);
@@ -306,6 +315,7 @@ static void fan_thread_entry(void *p)
 
     /* Initialize Wi-Fi */
     app_wifi_init();
+    esp_wifi_set_ps(WIFI_PS_NONE);
 
     /* Register an event handler for HomeKit specific events.
      * All event handlers should be registered only after app_wifi_init()
@@ -316,6 +326,10 @@ static void fan_thread_entry(void *p)
     hap_start();
     /* Start Wi-Fi */
     app_wifi_start(portMAX_DELAY);
+
+    // init LED controller
+    ledCtrlInit(500);
+
     /* The task ends here. The read/write callbacks will be invoked by the HAP Framework */
     vTaskDelete(NULL);
 }

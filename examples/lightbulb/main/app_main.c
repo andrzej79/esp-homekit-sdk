@@ -180,7 +180,7 @@ static void lightbulb_thread_entry(void *arg)
     hap_acc_add_product_data(accessory, product_data, sizeof(product_data));
 
     /* Create the Light Bulb Service. Include the "name" since this is a user visible service  */
-    service = hap_serv_lightbulb_create(true);
+    service = hap_serv_lightbulb_create(false);
     if (!service) {
         ESP_LOGE(TAG, "Failed to create LightBulb Service");
         goto light_err;
@@ -188,9 +188,9 @@ static void lightbulb_thread_entry(void *arg)
 
     /* Add the optional characteristic to the Light Bulb Service */
     int ret = hap_serv_add_char(service, hap_char_name_create("My Light"));
-    ret |= hap_serv_add_char(service, hap_char_brightness_create(50));
-    ret |= hap_serv_add_char(service, hap_char_hue_create(180));
-    ret |= hap_serv_add_char(service, hap_char_saturation_create(100));
+    ret |= hap_serv_add_char(service, hap_char_brightness_create(0));
+    //ret |= hap_serv_add_char(service, hap_char_hue_create(180));
+    //ret |= hap_serv_add_char(service, hap_char_saturation_create(0));
     
     if (ret != HAP_SUCCESS) {
         ESP_LOGE(TAG, "Failed to add optional characteristics to LightBulb");

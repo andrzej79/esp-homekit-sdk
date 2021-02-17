@@ -29,6 +29,8 @@
 
 #include "driver/ledc.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 typedef struct rgb {
     uint8_t r;  // 0-100 %
@@ -36,6 +38,11 @@ typedef struct rgb {
     uint8_t b;  // 0-100 %
 } rgb_t;
 
+typedef struct rgbpwm {
+    int32_t r;
+    int32_t g;
+    int32_t b;
+} rgbpwm_t;
 
 typedef struct hsp {
     uint16_t h;  // 0-360
@@ -45,14 +52,16 @@ typedef struct hsp {
 
 /* LED numbers below are for ESP-WROVER-KIT */
 /* Red LED */
-#define LEDC_IO_0 (0)
+#define LEDC_IO_0 (GPIO_NUM_16)
 /* Green LED */
-#define LEDC_IO_1 (2)
+#define LEDC_IO_1 (GPIO_NUM_17)
 /* Blued LED */
-#define LEDC_IO_2 (4)
+#define LEDC_IO_2 (GPIO_NUM_5)
 
 #define PWM_DEPTH (1023)
-#define PWM_TARGET_DUTY 8192
+#define PWM_TARGET_DUTY 1024
+
+#define ANIM_STEP 5
 
 static hsp_t s_hsb_val;
 static uint16_t s_brightness;
@@ -60,17 +69,74 @@ static bool s_on = false;
 
 static const char *TAG = "lightbulb";
 
+static rgbpwm_t targetRGB;
+
+/**
+ * @brief animate value
+ * @param cv - current value pointer
+ * @param tv - target value pointer
+ * @return none
+ */
+static void animValue(int32_t *cv, int32_t *tv, int32_t step) {
+  if(*tv > *cv) {
+    if(*cv + step > *tv) {
+      *cv = *tv;
+    } else {
+      *cv = (*cv + step);
+    }
+  }
+  if(*tv < *cv) {
+    if(*cv - step < *tv) {
+      *cv = *tv;
+    } else {
+      *cv = (*cv - step);
+    }
+  }
+}
+
+/**
+ * @brief task for led fading
+ * @param task priv params
+ * @return none
+ */
+static void ledcFadeTask(void *pvParams) {
+  rgbpwm_t currentRGB = {0, 0, 0};
+  for(;;) {
+    ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, currentRGB.r);
+    ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_1, currentRGB.g);
+    ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_2, currentRGB.b);
+    ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
+    ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_1);
+    ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_2);
+
+    if(currentRGB.r != targetRGB.r) {
+      animValue(&currentRGB.r, &targetRGB.r, ANIM_STEP);
+    }
+    if(currentRGB.g != targetRGB.g) {
+      animValue(&currentRGB.g, &targetRGB.g, ANIM_STEP);
+    }
+    if(currentRGB.b != targetRGB.b) {
+      animValue(&currentRGB.g, &targetRGB.g, ANIM_STEP);
+    }
+    vTaskDelay(10);
+  }
+}
+
 /**
  * @brief transform lightbulb's "RGB" and other parameter
  */
 static void lightbulb_set_aim(uint32_t r, uint32_t g, uint32_t b, uint32_t cw, uint32_t ww, uint32_t period)
 {
-    ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, r);
-    ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_1, g);
-    ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_2, b);
-    ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
-    ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_1);
-    ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_2);
+    // ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, r);
+    // ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_1, g);
+    // ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_2, b);
+    // ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
+    // ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_1);
+    // ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_2);
+
+    targetRGB.r = r;
+    targetRGB.g = g;
+    targetRGB.b = b;
 }
 
 /**
@@ -168,11 +234,12 @@ void lightbulb_init(void)
     // config the timer
     ledc_timer_config_t ledc_timer = {
         //set frequency of pwm
-        .freq_hz = 5000,
+        .freq_hz = 250,
         //timer mode,
         .speed_mode = LEDC_HIGH_SPEED_MODE,
         //timer index
-        .timer_num = LEDC_TIMER_0
+        .timer_num = LEDC_TIMER_0,
+        .duty_resolution = LEDC_TIMER_10_BIT
     };
     ledc_timer_config(&ledc_timer);
 
@@ -181,7 +248,7 @@ void lightbulb_init(void)
         //set LEDC channel 0
         .channel = LEDC_CHANNEL_0,
         //set the duty for initialization.(duty range is 0 ~ ((2**bit_num)-1)
-        .duty = 100,
+        .duty = 0,
         //GPIO number
         .gpio_num = LEDC_IO_0,
         //GPIO INTR TYPE, as an example, we enable fade_end interrupt here.
@@ -203,6 +270,9 @@ void lightbulb_init(void)
     ledc_channel.channel = LEDC_CHANNEL_2;
     ledc_channel.gpio_num = LEDC_IO_2;
     ledc_channel_config(&ledc_channel);
+
+    // start fading task
+    xTaskCreate(ledcFadeTask, "ledcfade", 2048, NULL, tskIDLE_PRIORITY + 1, NULL);
 }
 
 /**
@@ -268,7 +338,7 @@ int lightbulb_set_hue(float value)
  */
 int lightbulb_set_brightness(int value)
 {
-    ESP_LOGI(TAG, "lightbulb_set_brightness : %d", value);
+    ESP_LOGI(TAG, "lightbulb_set_brightness : %d mem: %d", value, xPortGetFreeHeapSize());
 
     s_hsb_val.b = value;
     s_brightness = s_hsb_val.b; 
